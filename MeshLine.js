@@ -9,14 +9,18 @@
 /// <summary>MeshLine object</summary>
 /// geometry - Currently only accept THREE.Geometry, with vertices making up the lines itself.
 /// material - Must be THREE.MeshLineMaterial
-THREE.MeshLine = function (lines, material) {
+THREE.MeshLine = function (points, width, color) {
     THREE.Mesh.call(this);
+
+    var lines = [points];
 
     this.type = 'Mesh';
 
+    width = width || 1;
+    color = color || '#000000';
     //this.geometry = geometry !== undefined ? geometry : new THREE.Geometry();
-    this._material = material !== undefined ? material : new THREE.MeshLineMaterial({});
-    this.material = new THREE.MultiMaterial([this._material]);
+    this._material = new THREE.MeshLineMaterial({lineWidth: width, lineColor: new THREE.Color(color)});
+    this.material = [this._material];
 
     this.geometry = new THREE.BufferMeshLineGeometry();
     if (!!lines) {
@@ -31,30 +35,37 @@ THREE.MeshLine = function (lines, material) {
 THREE.MeshLine.prototype = Object.create(THREE.Mesh.prototype);
 THREE.MeshLine.prototype.constructor = THREE.MeshLine;
 
-THREE.MeshLine.prototype.getMaterial = function() {
+THREE.MeshLine.prototype.raycast = function (raycaster, intersects) {
+    THREE.Line.prototype.raycast.call(this, raycaster, intersects);
+}
+THREE.MeshLine.prototype.getMaterial = function () {
     return this._material;
 }
 
 
 /// <summary>MeshLine material</summary>
 /// parameter.vertexColor = set to THREE.NoColors to use linecolor from the material itself. True to use geometry's own color.
-/// properties: 
+/// properties:
 /// linewidth = define, in world space, the width of the line.
 /// linecolor = define the color of the line if vertexColor = THREE.NoColors;
 THREE.MeshLineMaterial = function (parameter) {
     THREE.ShaderMaterial.call(this);
-    this.vertexColors = (parameter.lineColor !== undefined && parameter.lineColor !== null) ? THREE.NoColors : THREE.VertexColors;
-    var lineColorArr = (this.vertexColors === THREE.NoColors) ? parameter.lineColor.toArray() : [1,0,0];
+    var lineColorArr = parameter.lineColor ? parameter.lineColor.toArray() : [1, 0, 0];
+    this.transparent = true;
+    this.side = THREE.DoubleSide;
+    this.depthWrite = false;
+    this.depthTest = false;
     this.uniforms = {
-        "fWidth": { type: 'f', value: 0.2 },
-        "lineColor": { type: 'v3', value: (new THREE.Vector3()).fromArray(lineColorArr) }
+        "fWidth": {type: 'f', value: parameter.lineWidth},
+        "lineColor": {type: 'v3', value: (new THREE.Vector3()).fromArray(lineColorArr)}
     }
     this.vertexShader = [
         "uniform float fWidth;\n",
         "uniform vec3 lineColor;\n",
         "attribute vec3 other;\n",
-        "attribute float miter;\n",
+        "attribute vec2 miter;\n",
         "varying vec3 vColor;\n",
+        "varying float vRadius;\n",
         "",
         "vec2 fix( vec4 i, float aspect ) {",
         "",
@@ -77,24 +88,27 @@ THREE.MeshLineMaterial = function (parameter) {
         "#else\n",
         "   vColor = lineColor;\n",
         "#endif\n",
-        "   float aspect = projectionMatrix[1][1] / projectionMatrix[0][0];",  
+        "   float aspect = projectionMatrix[1][1] / projectionMatrix[0][0];",
         "   mat4 pmat = projectionMatrix * modelViewMatrix;",
         "   vec4 mvPos = pmat * vec4( position, 1.0 );\n", // Convert current and other positions into view coordinate
         "   vec4 otherPos = pmat * vec4( other, 1.0 );\n",
         "   vec2 dir = normalize(fix(otherPos,aspect) - fix(mvPos,aspect));\n", // Compute the direction vector to the "other" point
         "   dir.xy = dir.yx;\n", // Rotate it alone the view's xy plane by 90 degree
         "   dir.x = -dir.x;\n",
-        "   dir.xy = dir.xy * -miter * fWidth / (2.0 * mvPos.z);\n", // Invert based on miter value, modify length by half of line width
+        "   dir.xy = dir.xy * -miter.x * fWidth / (2.0 * mvPos.z);\n", // Invert based on miter value, modify length by half of line width
         "   mvPos.xy = mvPos.xy + unfix(dir.xy, aspect) * mvPos.w;\n", // Offset the point.
         //"   mvPos.z = mvPos.z + fWidth / 2.0;\n", // Offset the points toward user.
         //"   mvPos = projectionMatrix * mvPos;\n",
         "   gl_Position = mvPos;\n",
+        "   vRadius = miter.y;\n",
         "}"
     ].join('\n');
     this.fragmentShader = [
         "varying vec3 vColor;",
+        "varying float vRadius;",
         "void main() {",
-        "   gl_FragColor = vec4(vColor, 1.0);",
+        "   float sqr = vRadius * vRadius;",
+        "   gl_FragColor = vec4(vColor, 1.0 - sqr * sqr);",
         "}"
     ].join('\n');
 }
@@ -109,7 +123,7 @@ Object.defineProperty(THREE.MeshLineMaterial.prototype, 'linewidth', {
 
     set: function (linewidth) {
         if (!this.uniforms.fWidth) {
-            this.uniforms.fWidth = { type: 'f', value: 0.2 };
+            this.uniforms.fWidth = {type: 'f', value: 0.2};
         }
         this.uniforms.fWidth.value = linewidth;
     }
@@ -121,7 +135,7 @@ Object.defineProperty(THREE.MeshLineMaterial.prototype, 'linecolor', {
 
     set: function (lineColor) {
         if (!this.uniforms.lineColor) {
-            this.uniforms.lineColor = { type: 'v3', value: new THREE.Vector3(1, 0, 0) };
+            this.uniforms.lineColor = {type: 'v3', value: new THREE.Vector3(1, 0, 0)};
         }
         this.uniforms.lineColor.value = lineColor;
     }
@@ -140,11 +154,11 @@ THREE.BufferMeshLineGeometry.prototype = Object.create(THREE.BufferGeometry.prot
 THREE.BufferMeshLineGeometry.constructor = THREE.BufferMeshLineGeometry;
 
 Object.defineProperty(THREE.BufferMeshLineGeometry.prototype, 'linesNeedUpdate', {
-    get: function() {
+    get: function () {
         return false;
     },
 
-    set: function(needUpdate) {
+    set: function (needUpdate) {
         if (!!needUpdate) {
             this._linesUpdate();
         }
@@ -152,11 +166,11 @@ Object.defineProperty(THREE.BufferMeshLineGeometry.prototype, 'linesNeedUpdate',
 });
 
 Object.defineProperty(THREE.BufferMeshLineGeometry.prototype, 'needsUpdate', {
-    get: function() {
+    get: function () {
         return false;
     },
 
-    set: function(needUpdate) {
+    set: function (needUpdate) {
         if (!!needUpdate) {
             this._linesUpdate();
         }
@@ -169,19 +183,19 @@ THREE.BufferMeshLineGeometry.prototype.updateFromObject = function (object) {
     }
 }
 
-THREE.BufferMeshLineGeometry.prototype._lineVerticesCounts = function() {
+THREE.BufferMeshLineGeometry.prototype._lineVerticesCounts = function () {
     var count = 0;
     if (this.line.length > 1) count += this.line.length * 4 - 4;
 
     for (var i = 0; i < this.lines.length; i++) {
-        if (this.lines[i].length > 1){
+        if (this.lines[i].length > 1) {
             count += this.lines[i].length * 4 - 4;
         }
     }
     return count;
 }
 
-THREE.BufferMeshLineGeometry.prototype._linesUpdate = function() {
+THREE.BufferMeshLineGeometry.prototype._linesUpdate = function () {
     var expCount = this._lineVerticesCounts();
 
     if (expCount <= 0) {
@@ -190,12 +204,12 @@ THREE.BufferMeshLineGeometry.prototype._linesUpdate = function() {
     } else {
         this.visible = true;
     }
-    
+
     var attrIdx = 0;
-    var positions = new THREE.Float32Attribute(expCount * 3, 3);
-    var otherPositions = new THREE.Float32Attribute(expCount * 3, 3);
-    var colors = new THREE.Float32Attribute(expCount * 3, 3);
-    var miterDir = new THREE.Float32Attribute(expCount, 1);
+    var positions = new THREE.Float32BufferAttribute(expCount * 3, 3);
+    var otherPositions = new THREE.Float32BufferAttribute(expCount * 3, 3);
+    var colors = new THREE.Float32BufferAttribute(expCount * 3, 3);
+    var miterDir = new THREE.Float32BufferAttribute(expCount * 2, 2);
 
     this.clearGroups();
     var startIdx = 0;
@@ -243,16 +257,16 @@ THREE.BufferMeshLineGeometry.prototype._linesUpdate = function() {
     this.boundingSphere = null; // Clear bounding sphere.
 }
 
-THREE.BufferMeshLineGeometry.prototype._hasColor = function(color, line) {
+THREE.BufferMeshLineGeometry.prototype._hasColor = function (color, line) {
     // if color.length is undefined, that means the color is likely numeric.
     return (color !== null && color !== undefined) && (color.length === undefined || color.length == line.length);
 }
 
-THREE.BufferMeshLineGeometry.prototype._getColor = function(color, idx) {
+THREE.BufferMeshLineGeometry.prototype._getColor = function (color, idx) {
     return (!!color && color.length === undefined) ? color : color[idx];
 }
 
-THREE.BufferMeshLineGeometry.prototype._pushLine = function(i, line, lineColor, attrIdx, pos1, pos2, miter, color) {
+THREE.BufferMeshLineGeometry.prototype._pushLine = function (i, line, lineColor, attrIdx, pos1, pos2, miter, color) {
     var myVert = line[i];
     var hasColor = !(lineColor === undefined || lineColor === null);
     var colorValue = (hasColor) ? this._getColor(lineColor, i) : null;
@@ -263,10 +277,10 @@ THREE.BufferMeshLineGeometry.prototype._pushLine = function(i, line, lineColor, 
         var neighVert = line[i - 1]; // i will always be >= 1 if it gets here
         pos1.setXYZ(baseIdx, myVert.x, myVert.y, myVert.z);
         pos2.setXYZ(baseIdx, neighVert.x, neighVert.y, neighVert.z);
-        miter.setX(baseIdx, 1);
+        miter.setXY(baseIdx, 1, 1);
         pos1.setXYZ(baseIdx + 1, myVert.x, myVert.y, myVert.z);
         pos2.setXYZ(baseIdx + 1, neighVert.x, neighVert.y, neighVert.z);
-        miter.setX(baseIdx + 1, -1);
+        miter.setXY(baseIdx + 1, -1, -1);
         if (!!color && !!colorValue) {
             color.setXYZ(baseIdx, colorValue.r, colorValue.g, colorValue.b);
             color.setXYZ(baseIdx + 1, colorValue.r, colorValue.g, colorValue.b);
@@ -278,10 +292,10 @@ THREE.BufferMeshLineGeometry.prototype._pushLine = function(i, line, lineColor, 
         var neighVert = line[i + 1]; // i+1 will always be < max length if it gets here
         pos1.setXYZ(baseIdx + 2, myVert.x, myVert.y, myVert.z);
         pos2.setXYZ(baseIdx + 2, neighVert.x, neighVert.y, neighVert.z);
-        miter.setX(baseIdx + 2, -1);
+        miter.setXY(baseIdx + 2, -1, 1);
         pos1.setXYZ(baseIdx + 3, myVert.x, myVert.y, myVert.z);
         pos2.setXYZ(baseIdx + 3, neighVert.x, neighVert.y, neighVert.z);
-        miter.setX(baseIdx + 3, 1);
+        miter.setXY(baseIdx + 3, 1, -1);
         if (!!color && !!colorValue) {
             color.setXYZ(baseIdx + 2, colorValue.r, colorValue.g, colorValue.b);
             color.setXYZ(baseIdx + 3, colorValue.r, colorValue.g, colorValue.b);
