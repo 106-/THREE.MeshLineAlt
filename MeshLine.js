@@ -25,6 +25,7 @@ THREE.MeshLine = function (points, width, color) {
     this.geometry = new THREE.BufferMeshLineGeometry();
     if (!!lines) {
         this.geometry.lines = lines;
+        this.geometry.changingLines();
         this.geometry.needsUpdate = true;
     }
 
@@ -148,6 +149,11 @@ THREE.BufferMeshLineGeometry = function () {
     this.lineColor = [];
     this.lines = []; // For array of lines
     this.linesColor = [];
+    this.expCount = null;
+    this.positions = null;
+    this.otherPositions = null;
+    this.colors = null;
+    this.miterDir = null;
 }
 
 THREE.BufferMeshLineGeometry.prototype = Object.create(THREE.BufferGeometry.prototype);
@@ -177,6 +183,24 @@ Object.defineProperty(THREE.BufferMeshLineGeometry.prototype, 'needsUpdate', {
     }
 });
 
+// call this after changing this.lines
+THREE.BufferMeshLineGeometry.prototype.changingLines = function () {
+    this.expCount = this._lineVerticesCounts();
+    this.positions = new THREE.Float32BufferAttribute(this.expCount * 3, 3);
+    this.otherPositions = new THREE.Float32BufferAttribute(this.expCount * 3, 3);
+    this.colors = new THREE.Float32BufferAttribute(this.expCount * 3, 3);
+    this.miterDir = new THREE.Float32BufferAttribute(this.expCount * 2, 2);
+    this.addAttribute('position', this.positions);
+    this.addAttribute('other', this.otherPositions);
+    this.addAttribute('miter', this.miterDir);
+    if (this.expCount <= 0) {
+        this.visible = false;
+        this.expCount = 0;
+    } else {
+        this.visible = true;
+    }
+}
+
 THREE.BufferMeshLineGeometry.prototype.updateFromObject = function (object) {
     if (object instanceof THREE.MeshLine) {
         return this.fromGeometry(object.geometry);
@@ -196,20 +220,7 @@ THREE.BufferMeshLineGeometry.prototype._lineVerticesCounts = function () {
 }
 
 THREE.BufferMeshLineGeometry.prototype._linesUpdate = function () {
-    var expCount = this._lineVerticesCounts();
-
-    if (expCount <= 0) {
-        this.visible = false;
-        expCount = 0;
-    } else {
-        this.visible = true;
-    }
-
     var attrIdx = 0;
-    var positions = new THREE.Float32BufferAttribute(expCount * 3, 3);
-    var otherPositions = new THREE.Float32BufferAttribute(expCount * 3, 3);
-    var colors = new THREE.Float32BufferAttribute(expCount * 3, 3);
-    var miterDir = new THREE.Float32BufferAttribute(expCount * 2, 2);
 
     this.clearGroups();
     var startIdx = 0;
@@ -218,7 +229,7 @@ THREE.BufferMeshLineGeometry.prototype._linesUpdate = function () {
         startIdx = attrIdx;
         attrIdx -= 2;
         for (var i = 0; i < this.line.length; i++, attrIdx += 4) {
-            this._pushLine(i, this.line, this.lineColor, attrIdx, positions, otherPositions, miterDir, colors);
+            this._pushLine(i, this.line, this.lineColor, attrIdx, this.positions, this.otherPositions, this.miterDir, this.colors);
         }
         attrIdx -= 2;
         if ((attrIdx - startIdx) > 0) {
@@ -227,13 +238,11 @@ THREE.BufferMeshLineGeometry.prototype._linesUpdate = function () {
     }
 
     for (var j = 0; j < this.lines.length; j++) {
-        var line = this.lines[j];
-        var lineColor = this.linesColor[j];
-        if (line.length > 1) {
+        if (this.lines[j].length > 1) {
             startIdx = attrIdx;
             attrIdx -= 2;
-            for (var i = 0; i < line.length; i++, attrIdx += 4) {
-                this._pushLine(i, line, lineColor, attrIdx, positions, otherPositions, miterDir, colors);
+            for (var i = 0; i < this.lines[j].length; i++, attrIdx += 4) {
+                this._pushLine(i, this.lines[j], this.linesColor[j], attrIdx, this.positions, this.otherPositions, this.miterDir, this.colors);
             }
             attrIdx -= 2;
             if ((attrIdx - startIdx) > 0) {
@@ -242,17 +251,13 @@ THREE.BufferMeshLineGeometry.prototype._linesUpdate = function () {
         }
     }
 
-    positions.needsUpdate = true;
-    otherPositions.needsUpdate = true;
-    miterDir.needsUpdate = true;
+    this.positions.needsUpdate = true;
+    this.otherPositions.needsUpdate = true;
+    this.miterDir.needsUpdate = true;
 
-    this.addAttribute('position', positions);
-    this.addAttribute('other', otherPositions);
-    this.addAttribute('miter', miterDir);
-
-    if (!!colors) {
-        colors.needsUpdate = true;
-        this.addAttribute('color', colors);
+    if (!!this.colors) {
+        this.colors.needsUpdate = true;
+        this.addAttribute('color', this.colors);
     }
     this.boundingSphere = null; // Clear bounding sphere.
 }
